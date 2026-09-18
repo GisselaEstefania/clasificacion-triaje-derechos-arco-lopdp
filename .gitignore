@@ -1,0 +1,5 @@
+# Ignorar secretos locales y entornos virtuales
+.streamlit/secrets.toml
+.env
+__pycache__/
+*.eml
