@@ -31,10 +31,10 @@ openai_api_key = api_key_input.strip() if api_key_input.strip() else api_key_sec
 st.title("⚖️ Sistema Inteligente de Triaje de Reclamos LOPDP")
 st.caption("Procesamiento y clasificación automática de hilos de correo (.eml) bajo la LOPDP")
 
-# Prompt del Sistema
+# Prompt del Sistema (CAPA 2: Actualizado con Guardraíl y Categoría de Descarte)
 SYSTEM_PROMPT = """
 Eres un especialista legal y de TI en la Ley Orgánica de Protección de Datos Personales (LOPDP).
-Tu trabajo es analizar un HILO DE CORREOS ELECTRÓNICOS y clasificar el reclamo en EXACTAMENTE UNA de las siguientes 3 categorías:
+Tu trabajo es analizar un HILO DE CORREOS ELECTRÓNICOS y clasificar el reclamo en EXACTAMENTE UNA de las siguientes 4 categorías:
 
 CATEGORÍAS Y DEFINICIONES CONCEPTUALES:
 
@@ -47,18 +47,21 @@ CATEGORÍAS Y DEFINICIONES CONCEPTUALES:
 3. "Derivación - No es cliente"
    - Definición: Ocurre cuando el reclamante manifiesta no tener relación contractual/comercial con la entidad, o cuando la nota interna del hilo especifica que la cartera pertenece a otra institución (cartera cedida o gestionada para un tercero).
 
-REGLAS DE SALIDA:
-- Analiza la intención principal expresada en el texto.
+4. "Información Insuficiente / Saludo"
+   - Definición: Ocurre cuando el texto es únicamente un saludo, una prueba, una frase corta sin contexto o NO contiene información suficiente ni explícita sobre un reclamo, cobro o tratamiento de datos LOPDP.
+
+REGLAS MANDATORIAS:
+- NUNCA asumas ni infieras una categoría de riesgo (como Contacto de Tercero) si el texto no contiene un reclamo o hecho explícito.
 - Devuelve la respuesta ÚNICAMENTE en el objeto JSON solicitado sin texto adicional.
 
 FORMATO JSON:
 {
-  "categoria": "<Contacto de tercero | Ejercicio de derechos por no titular | Derivación - No es cliente>",
+  "categoria": "<Contacto de tercero | Ejercicio de derechos por no titular | Derivación - No es cliente | Información Insuficiente / Saludo>",
   "certeza_porcentaje": <Número entero de 0 a 100>,
-  "titular_afectado": "<Nombre del cliente o titular>",
+  "titular_afectado": "<Nombre del cliente o titular o 'No detectado'>",
   "identificacion": "<Cédula/CI/RUC detectado o 'No detectado'>",
-  "remitente_original": "<Nombre del remitente que origina la queja>",
-  "canales_contacto": "<Teléfono / Email mencionados>",
+  "remitente_original": "<Nombre del remitente que origina la queja o 'No detectado'>",
+  "canales_contacto": "<Teléfono / Email mencionados o 'No detectado'>",
   "resumen_hilo": "<Resumen ejecutivo de 2 líneas>",
   "recomendacion_analista": "<Acción técnica e inmediata para el operador humano>"
 }
@@ -119,6 +122,35 @@ if st.button("🔍 Procesar y Clasificar Hilo"):
     elif not openai_api_key:
         st.error("🔑 No se detectó una API Key válida. Por favor ingresa una en el menú lateral.")
     else:
+        # =====================================================================
+        # 📍 CAPA 1: VALIDACIÓN PREVIA EN PYTHON (FILTRO DE LONGITUD/CONTENIDO)
+        # =====================================================================
+        texto_limpio = hilo_correo.strip().lower()
+        palabras = texto_limpio.split()
+        
+        # Filtra si el texto tiene menos de 15 caracteres o menos de 3 palabras (Ej: "hola", "buenos días")
+        if len(texto_limpio) < 15 or len(palabras) < 3:
+            st.warning("⚠️ Texto Insuficiente / Entrada Trivial")
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.markdown("### 📊 Clasificación LOPDP")
+                st.metric("Categoría Asignada", "Información Insuficiente / Saludo")
+                st.progress(1.0, text="Certeza de Clasificación: 100%")
+                st.markdown("### 📝 Resumen Operativo")
+                st.info("El texto ingresado es un saludo, una frase muy corta o no contiene contexto suficiente sobre un reclamo.")
+            with col2:
+                st.markdown("### 📋 Metadatos Extraídos del Hilo")
+                st.write("• **Titular Afectado:** No detectado")
+                st.write("• **Identificación / Cédula:** `No detectado`")
+                st.write("• **Cliente Relacionado:** No detectado")
+                st.write("• **Remitente Original / Abogado:** No detectado")
+                st.write("• **Canales Autorizados:** `No detectado`")
+            st.markdown("---")
+            st.markdown("### 💡 Acción Sugerida para el Operador (Human-in-the-Loop)")
+            st.warning("Solicitar al remitente que proporcione el detalle completo del reclamo o número de identificación antes de procesar.")
+            st.stop()  # Detiene la ejecución para NO llamar a la API de OpenAI
+        # =====================================================================
+
         try:
             client = OpenAI(api_key=openai_api_key)
             
@@ -153,11 +185,11 @@ if st.button("🔍 Procesar y Clasificar Hilo"):
                 st.markdown("### 📋 Metadatos Extraídos del Hilo")
                 st.write(f"• **Titular Afectado:** {res_json.get('titular_afectado')}")
                 st.write(f"• **Identificación / Cédula:** `{res_json.get('identificacion')}`")
-                st.write(f"• **Cliente Relacionado:** {res_json.get('cliente_relacionado')}")
+                st.write(f"• **Cliente Relacionado:** {res_json.get('cliente_relacionado', 'No detectado')}")
                 st.write(f"• **Remitente Original / Abogado:** {res_json.get('remitente_original')}")
                 st.write(f"• **Canales Autorizados:** `{res_json.get('canales_contacto')}`")
-                st.write(f"• **Contacto Reportado:** `{res_json.get('contacto_reportado')}`")
-                st.write(f"• **Empresa Gestion:** `{res_json.get('empresa_contacto')}`")
+                st.write(f"• **Contacto Reportado:** `{res_json.get('contacto_reportado', 'No detectado')}`")
+                st.write(f"• **Empresa Gestion:** `{res_json.get('empresa_contacto', 'No detectado')}`")
 
             st.markdown("---")
             st.markdown("### 💡 Acción Sugerida para el Operador (Human-in-the-Loop)")
@@ -165,11 +197,3 @@ if st.button("🔍 Procesar y Clasificar Hilo"):
 
         except Exception as e:
             st.error(f"❌ Error al procesar la solicitud con OpenAI: {str(e)}")
-
-
-
-
-            
-               
-       
-            
