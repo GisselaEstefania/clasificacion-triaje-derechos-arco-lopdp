@@ -7,94 +7,101 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 SYSTEM_PROMPT = """
 Eres un especialista legal y de TI en la Ley Orgánica de Protección de Datos Personales (LOPDP).
-Tu trabajo es leer un HILO COMPLETO DE CORREOS ELECTRÓNICOS (que contiene notas internas, avisos de confidencialidad y el reclamo original) y realizar un análisis estructurado.
+Tu trabajo es analizar un HILO DE CORREOS ELECTRÓNICOS y clasificar el reclamo en EXACTAMENTE UNA de las siguientes 3 categorías:
 
-Debes categorizar el reclamo en UNA de las siguientes 3 clases exactas:
-1. "Contacto de tercero" (Reclamos por llamadas/mensajes a familiares, referencias o no titulares).
-2. "Ejercicio de derechos por no titular" (Solicitudes presentadas por abogados,personas que no son clientes y solo el contacto esta asociado, apoderados o terceros sin acreditar debidamente el poder legal del titular).
-3. "Derivación - Es cliente cedente" (Casos donde la persona es cliente de una cartera que pertenece a una institución cedente y aqui solo se gestiona).
+CATEGORÍAS Y DEFINICIONES CONCEPTUALES:
 
-Devuelve la respuesta ÚNICAMENTE en este objeto JSON:
+1. "Contacto de tercero"
+   - Definición: Ocurre cuando el canal de contacto (teléfono, email, WhatsApp) utilizado pertenece a una persona distinta al titular de la obligación/deuda (un familiar, compañero, o tercero sin relación) que solicita el cese de gestión hacia su persona.
+
+2. "Ejercicio de derechos por no titular"
+   - Definición: Ocurre cuando un tercero (abogado, apoderado o familiar) solicita ejercitar un derecho ARCOP/LOPDP (acceso, rectificación, cancelación, oposición) A NOMBRE Y EN REPRESENTACIÓN del titular, pero la solicitud requiere validación de representación legal.
+
+3. "Derivación - No es cliente"
+   - Definición: Ocurre cuando el reclamante manifiesta no tener relación contractual/comercial con la entidad, o cuando la nota interna del hilo especifica que la cartera pertenece a otra institución (cartera cedida o gestionada para un tercero).
+
+REGLAS DE SALIDA:
+- Analiza la intención principal expresada en el texto.
+- Devuelve la respuesta ÚNICAMENTE en el objeto JSON solicitado sin texto adicional.
+
+FORMATO JSON:
 {
-  "categoria": "<Nombre exacto de la categoría>",
-  "contacto_reportado": "<dato que se solicita suspender su uso>", 
+  "categoria": "<Contacto de tercero | Ejercicio de derechos por no titular | Derivación - No es cliente>",
   "certeza_porcentaje": <Número entero de 0 a 100>,
-  "titular_afectado": "<Nombre del titular>",
-  "cliente_relacionado":<Puede se el mismo titular si es que es nuestro cliente, u otro si el cliente esta atado al contacto reportado>",
+  "titular_afectado": "<Nombre del cliente o titular>",
   "identificacion": "<Cédula/CI/RUC detectado o 'No detectado'>",
-  "remitente_original": "<Nombre del abogado o persona que origina la queja>",
-  "canales_contacto": "<Teléfono / Email autorizados>",
-  "empresa_contacto": "<Usuario o empresa que envió el Email o llamo a hacer la cobranza>",
-  "resumen_hilo": "<Breve resumen de 2 líneas de lo que solicita la DPO o el cliente>",
+  "remitente_original": "<Nombre del remitente que origina la queja>",
+  "canales_contacto": "<Teléfono / Email mencionados>",
+  "resumen_hilo": "<Resumen ejecutivo de 2 líneas>",
   "recomendacion_analista": "<Acción técnica e inmediata para el operador humano>"
 }
 """
 
 # Dataset de evaluación con Hilos de Correo Sintéticos Expandidos
-DATASET_EVALUACION = [
-    # Categoría 1: Contacto de tercero
+DATASET_EVALUACION_NUEVO = [
+    # Categoría 1: Contacto de tercero (Redacción variada)
     {
-        "hilo": "De: delegadopdp@banco.com\nPara: gestion@cobranzas.com\nAsunto: RE: Queja LOPDP\n\nEstimados, trasladar a lista no gestionable por llamada a tercero.\n\n---\nDe: hermano@mail.com\nAsunto: Dejen de llamar a mi celular\n\nMe están llamando a mi teléfono a cobrar la deuda de un hermano. Yo no he autorizado el uso de mi número ni soy garante.",
+        "hilo": "De: perez_family@gmail.com\nAsunto: Molestias por llamada\n\nSres. Banco, dejen de llamar al celular de mi esposa a preguntar por mi primo. Ella no debe nada.",
         "categoria_esperada": "Contacto de tercero"
     },
     {
-        "hilo": "De: delegadopdp@banco.com\nPara: ti@cobranzas.com\nAsunto: RE: Reclamo Nro 123\n\nFavor depurar de la base.\n\n---\nDe: usuario@gmail.com\nAsunto: Eliminación de datos\n\nRecibo correos y mensajes de texto sobre una cuenta de un tercero que no conozco. Solicito eliminen mi teléfono de su base de datos.",
+        "hilo": "De: recepcion@mifirma.com\nAsunto: Teléfono corporativo\n\nLlaman a la línea fija de la empresa a pedir con un ex empleado. Este número es corporativo, remuevan el registro.",
         "categoria_esperada": "Contacto de tercero"
     },
     {
-        "hilo": "De: esposo@hotmail.com\nPara: contacto@banco.com\nAsunto: Violación de privacidad\n\nEstán contactando a mi esposa para ubicarme. Ella jamás dio su consentimiento para que la llamen. Exijo la eliminación inmediata de su número.",
+        "hilo": "De: vecino@yahoo.com\nAsunto: Mensajes equivocados\n\nMe llegan SMS de cobro para un señor de apellido Ramos. Yo compré esta línea telefónica hace un mes.",
         "categoria_esperada": "Contacto de tercero"
     },
     {
-        "hilo": "De: companero@empresa.com\nPara: reclamos@cobranzas.com\nAsunto: Cese de llamadas\n\nMe llaman insistentemente a consultar por un compañero de trabajo. No soy el titular de la deuda ni referencia, dejen de llamar a la oficina.",
+        "hilo": "De: garante_no@hotmail.com\nAsunto: Intimación de cobro\n\nEscriben a mi correo a exigirme el pago de un amigo. Yo nunca firmé como garante ni acepté notificaciones.",
         "categoria_esperada": "Contacto de tercero"
     },
     {
-        "hilo": "De: familiar@gmail.com\nPara: servicioalcliente@banco.com\nAsunto: Contacto por WhatsApp sin autorización\n\nEstimados, me escribieron por WhatsApp a pedir referencias de un familiar. No he otorgado autorización de mis datos personales.",
+        "hilo": "De: contacto_ec@gmail.com\nAsunto: Retiro de datos\n\nPor favor eliminen mi WhatsApp de su sistema. Me contactaron buscando a una persona que no habita en este domicilio.",
         "categoria_esperada": "Contacto de tercero"
     },
 
-    # Categoría 2: Ejercicio de derechos por no titular
+    # Categoría 2: Ejercicio de derechos por no titular (Redacción variada)
     {
-        "hilo": "De: madre@mail.com\nPara: delegadopdp@banco.com\nAsunto: Petición LOPDP\n\nBuenos días, solicito la eliminación de los datos personales y récord crediticio de mi hijo. Adjunto su número de cédula 1712345678.",
+        "hilo": "De: consorcio_legal@estudio.ec\nAsunto: Solicitud de Oposición LOPDP\n\nComo defensa técnica del Ing. Marco Silva, solicito la suspensión del tratamiento de sus datos personales.",
         "categoria_esperada": "Ejercicio de derechos por no titular"
     },
     {
-        "hilo": "De: estudio@abogados.com\nPara: dpo@banco.com\nAsunto: Solicitud de Acceso - LOPDP\n\nSoy el abogado de la Sra. María Pérez (Cédula 0987654321) y pido el acceso a su historial de datos bajo la LOPDP sin adjuntar poder especial aún.",
+        "hilo": "De: tutor_legal@mail.com\nAsunto: Baja de base de datos\n\nSolicito formalmente la eliminación de los datos de mi representado menor de edad de sus registros comerciales.",
         "categoria_esperada": "Ejercicio de derechos por no titular"
     },
     {
-        "hilo": "De: hija@outlook.com\nPara: servcliente@banco.com\nAsunto: Actualización de datos de mi madre\n\nEscribo a nombre de mi madre para solicitar la rectificación de su dirección y correo electrónico registrados en su sistema.",
+        "hilo": "De: familiar_perez@gmail.com\nAsunto: Corrección de dirección\n\nMi abuelo ya no vive ahí. Como su familiar a cargo pido actualizar su domicilio en su sistema.",
         "categoria_esperada": "Ejercicio de derechos por no titular"
     },
     {
-        "hilo": "De: apoderado@juridico.ec\nPara: delegadopdp@banco.com\nAsunto: Eliminación de datos\n\nRequiero que borren la información comercial de mi representado, el Sr. Juan Gómez, cédula 1102345678.",
+        "hilo": "De: apoderado_ec@outlook.com\nAsunto: Acceso a información LOPDP\n\nAdjunto carta de mi cliente donde me faculta a requerir la copia del historial de datos que conservan de su persona.",
         "categoria_esperada": "Ejercicio de derechos por no titular"
     },
     {
-        "hilo": "De: primo@gmail.com\nPara: dpo@banco.com\nAsunto: Oposición de tratamiento\n\nVengo en representación de un familiar para ingresar una solicitud de oposición al tratamiento de sus datos personales.",
+        "hilo": "De: abg_mendoza@juridico.com\nAsunto: Reclamo LOPDP\n\nA nombre del Sr. Roberto Gómez (CI 1700000000), exijo la cancelación inmediata de sus datos de marcación.",
         "categoria_esperada": "Ejercicio de derechos por no titular"
     },
 
-    # Categoría 3: Derivación - No es cliente
+    # Categoría 3: Derivación - No es cliente (Redacción variada)
     {
-        "hilo": "De: ciudadano@yahoo.com\nPara: cobro@banco.com\nAsunto: Cobro no identificado\n\nEstimados, me cobran un valor de una tarjeta de crédito, pero yo nunca he sido cliente de su institución financiera.",
+        "hilo": "De: usuario_indignado@gmail.com\nAsunto: Error de cobro\n\nMe están notificando por un crédito automotriz que jamás contraté con ustedes. Verifiquen su base.",
         "categoria_esperada": "Derivación - No es cliente"
     },
     {
-        "hilo": "De: delegadopdp@banco.com\nPara: operaciones@cobranzas.com\nAsunto: RE: Cartera cedida\n\nVerificar origen. La cartera corresponde a Banco X y no a nuestra cartera propia.\n\n---\nDe: usuario@mail.com\nAsunto: Notificación de cobro\n\nRecibí una notificación, sin embargo la obligación pertenece al Banco X.",
+        "hilo": "De: delegadopdp@banco.com\nPara: cobranzas@ext.com\nAsunto: RE: Inconsistencia\n\nRevisado en core: La persona no registra operaciones activas ni pasivas en la institución. Derivar caso.",
         "categoria_esperada": "Derivación - No es cliente"
     },
     {
-        "hilo": "De: cliente@gmail.com\nPara: estadosdecuenta@banco.com\nAsunto: Error en envío\n\nReviso mi casillero y me llega estado de cuenta de un producto que no contraté con ustedes, derivar al banco emisor correspondiente.",
+        "hilo": "De: reclamos@empresa.com\nAsunto: Cartera castigada de tercero\n\nLa obligación reportada en el Buró corresponde a la Cooperativa XYZ, no a su entidad. Solicito canalizar a donde corresponda.",
         "categoria_esperada": "Derivación - No es cliente"
     },
     {
-        "hilo": "De: afectado@outlook.com\nPara: reclamos@banco.com\nAsunto: Cartera castigada\n\nMe indican que estoy en cartera castigada pero la obligación es de otra cooperativa. Solicito derivar mi caso a la entidad dueña de la cartera.",
+        "hilo": "De: ciudadano123@yahoo.com\nAsunto: Sin contrato registrado\n\nJamás he abierto una cuenta ni solicitado tarjeta en su banco. Favor reorientar la gestión de cobro.",
         "categoria_esperada": "Derivación - No es cliente"
     },
     {
-        "hilo": "De: no_cliente@hotmail.com\nPara: dpo@banco.com\nAsunto: Sin relación comercial\n\nNo tengo ninguna relación comercial registrada con ustedes. Favor verificar si la gestión le pertenece a un tercero contratante.",
+        "hilo": "De: soporte@banco.com\nAsunto: Cartera cedida\n\nEstimados, la cuenta reportada pertenece a la cartera comprada a Banco Pasado. Proceder con el redireccionamiento.",
         "categoria_esperada": "Derivación - No es cliente"
     }
 ]
@@ -105,12 +112,12 @@ def ejecutar_evaluacion_masiva():
         return
 
     client = OpenAI(api_key=OPENAI_API_KEY)
-    print(f"🚀 Iniciando evaluación de {len(DATASET_EVALUACION)} casos con GPT-3.5...\n")
+    print(f"🚀 Iniciando evaluación de {len(DATASET_EVALUACION_NUEVO)} casos con GPT-3.5...\n")
 
     aciertos = 0
-    total = len(DATASET_EVALUACION)
+    total = len(DATASET_EVALUACION_NUEVO)
 
-    for i, item in enumerate(DATASET_EVALUACION, start=1):
+    for i, item in enumerate(DATASET_EVALUACION_NUEVO, start=1):
         hilo = item["hilo"]
         esperado = item["categoria_esperada"]
 
